@@ -2,8 +2,7 @@
 #include <ArduinoOTA.h>
 #include <FS.h>
 #include <WiFiManager.h>
-#include <Adafruit_MQTT.h>
-#include <Adafruit_MQTT_Client.h>
+#include <MQTT.h>
 #include <ArduinoJson.h>
 #include <ESP8266WebServer.h>
 #include "DubRtttl.h"
@@ -23,10 +22,9 @@ WiFiClient  wifiClient;
 
 ESP8266WebServer webServer(80);
 
-// Setup the MQTT client class by passing in the WiFi client and MQTT server and login details.
-Adafruit_MQTT_Client    mqtt(&wifiClient, MQTT_HOST, MQTT_PORT/*, MQTT_USER, MQTT_PASS*/);
-Adafruit_MQTT_Subscribe mqtt_subscribe (&mqtt, "wifi2mqtt/esp_bell/set");
-Adafruit_MQTT_Publish   mqtt_publish   (&mqtt, "wifi2mqtt/esp_bell");
+
+
+MQTTClient client(10000);
 
 
 void myTone(int freq, int duration)
@@ -35,32 +33,29 @@ void myTone(int freq, int duration)
     delay(duration);
 }
 
-/**
- * Conect to MQTT broker. Do nothing if already connected
- */
-void mqtt_connect()
-{
 
-    // Do nothing if already connected.
-    if (mqtt.connected())
-    {
+
+
+void messageReceived(String &topic, String &payload) {
+    Serial.println("incoming: " + topic + " - " + payload);
+
+    DynamicJsonDocument doc(10000);
+
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error)
         return;
+
+    // Fetch values.
+
+    if(doc.containsKey("melody")){
+        String melody = doc["melody"];
+
+        // Print values.
+        Serial.print("Playing melody: ");
+        Serial.println(melody);
+
+        rtttl.play(melody);
     }
-    Serial.print("Connecting to MQTT... ");
-    uint8_t retries = 10, ret;
-    while ((ret = mqtt.connect()) != 0)
-    { // connect will return 0 for connected
-        Serial.println(mqtt.connectErrorString(ret));
-        Serial.println("Retrying MQTT connection in 5 seconds...");
-        mqtt.disconnect();
-        delay(3000); // wait 3 seconds
-        retries--;
-        if (retries == 0)
-        {
-            return;
-        }
-    }
-    Serial.println("MQTT Connected!");
 }
 
 void setup() 
@@ -99,39 +94,17 @@ void setup()
     }
 
 
-    // Setup MQTT subscription for the 'set' topic.
-    // It is important to subscribe BEFORE the mqtt connect (!)
-    mqtt.subscribe(&mqtt_subscribe);
 
-    mqtt_subscribe.setCallback([](char *str, uint16_t len){
-        Serial.print(String("Got mqtt message len="));
-        Serial.println(len);
-        char buf [len + 1];
-        buf[len] = 0;
-        strncpy(buf, str, len);
+    client.begin(MQTT_HOST, MQTT_PORT, wifiClient);
+    client.onMessage(messageReceived);
 
-        Serial.println(String("Got mqtt message: ") + buf);
-        DynamicJsonDocument doc(1024);
+    Serial.print("\nconnecting to mqtt...");
+    while (!client.connect("arduino", MQTT_USER, MQTT_PASS)) {
+        Serial.print(".");
+        delay(1000);
+    }
 
-        DeserializationError error = deserializeJson(doc, buf);
-        if (error)
-            return;
-        
-        // Fetch values.
-
-        if(doc.containsKey("melody")){
-            String melody = doc["melody"];
-
-            // Print values.
-            Serial.print("Playing melody: ");
-            Serial.println(melody);
-
-            rtttl.play(melody);
-        }
-
-    });
-    mqtt_connect();
-
+    client.subscribe("wifi2mqtt/esp_bell/set");
 
     webServer.begin();
 
@@ -181,8 +154,8 @@ void setup()
         }
     });
 
-    bool ok = mqtt_publish.publish("started");
-    Serial.println(ok ? "Published: OK" : "Published: ERR");
+    // bool ok = mqtt_publish.publish("started");
+    // Serial.println(ok ? "Published: OK" : "Published: ERR");
 
     // Initialize OTA (firmware updates via WiFi)
     ArduinoOTA.begin();
@@ -195,9 +168,8 @@ void setup()
 
 void loop() 
 {
-    mqtt_connect();
     ArduinoOTA.handle();
     rtttl.updateMelody();
-    mqtt.processPackets(10);
+    client.loop();
     webServer.handleClient();
 }
