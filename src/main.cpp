@@ -94,12 +94,11 @@ void setup()
     }
 
 
-
     client.begin(MQTT_HOST, MQTT_PORT, wifiClient);
     client.onMessage(messageReceived);
 
     Serial.print("\nconnecting to mqtt...");
-    while (!client.connect("arduino", MQTT_USER, MQTT_PASS)) {
+    while (!client.connect(deviceName.c_str(), MQTT_USER, MQTT_PASS)) {
         Serial.print(".");
         delay(1000);
     }
