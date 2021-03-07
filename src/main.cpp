@@ -103,13 +103,14 @@ void setup()
         delay(1000);
     }
 
-    client.subscribe("wifi2mqtt/esp_bell/set");
+    client.subscribe("wifi2mqtt/esp-bell/set");
 
     webServer.begin();
 
     String menu;
         menu += "<div>";
         menu += "<a href='/'>index</a> ";
+        menu += "<a href='/play'>play</a> ";
         menu += "<a href='/logout'>logout</a> ";
         menu += "</div><hr>";
 
@@ -153,8 +154,26 @@ void setup()
         }
     });
 
-    // bool ok = mqtt_publish.publish("started");
-    // Serial.println(ok ? "Published: OK" : "Published: ERR");
+    // Play melody 
+    webServer.on("/play", [](){
+        if(webServer.method() == HTTP_POST){
+            String melody = webServer.arg("melody");
+
+            if(melody.length() > 0){
+                rtttl.play(melody);
+                webServer.send(200, "text/html", String("Playing melody: ") + melody);        
+            }
+            else
+                webServer.send(400, "text/html", "'melody' GET parameter is required");
+        }
+        else{
+            webServer.send(400, "text/html", "<form method='POST'><textarea name='melody'></textarea><button>play</button></form>");
+        }
+    });
+
+
+    bool ok = client.publish("wifi2mqtt/esp-bell", "started");
+    Serial.println(ok ? "Published: OK" : "Published: ERR");
 
     // Initialize OTA (firmware updates via WiFi)
     ArduinoOTA.begin();
