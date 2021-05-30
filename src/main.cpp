@@ -24,7 +24,7 @@ ESP8266WebServer webServer(80);
 
 
 
-MQTTClient client(10000);
+MQTTClient mqttClient(10000);
 
 
 void myTone(int freq, int duration)
@@ -56,6 +56,24 @@ void messageReceived(String &topic, String &payload) {
 
         rtttl.play(melody);
     }
+}
+
+void mqtt_connect() {
+    Serial.print("checking wifi...");
+    while (WiFi.status() != WL_CONNECTED) {
+        Serial.print(".");
+        delay(1000);
+    }
+
+    Serial.print("\nconnecting...");
+    while (!mqttClient.connect("esp-bell", MQTT_USER, MQTT_PASS)) {
+        Serial.print(".");
+        delay(1000);
+    }
+
+    Serial.println("\nconnected!");
+
+    mqttClient.subscribe("wifi2mqtt/esp-bell/set");
 }
 
 void setup() 
@@ -94,16 +112,10 @@ void setup()
     }
 
 
-    client.begin(MQTT_HOST, MQTT_PORT, wifiClient);
-    client.onMessage(messageReceived);
+    mqttClient.begin(MQTT_HOST, MQTT_PORT, wifiClient);
+    mqttClient.onMessage(messageReceived);
 
-    Serial.print("\nconnecting to mqtt...");
-    while (!client.connect(deviceName.c_str(), MQTT_USER, MQTT_PASS)) {
-        Serial.print(".");
-        delay(1000);
-    }
-
-    client.subscribe("wifi2mqtt/esp-bell/set");
+    mqtt_connect();
 
     webServer.begin();
 
@@ -172,7 +184,7 @@ void setup()
     });
 
 
-    bool ok = client.publish("wifi2mqtt/esp-bell", "started");
+    bool ok = mqttClient.publish("wifi2mqtt/esp-bell", "started");
     Serial.println(ok ? "Published: OK" : "Published: ERR");
 
     // Initialize OTA (firmware updates via WiFi)
@@ -188,6 +200,11 @@ void loop()
 {
     ArduinoOTA.handle();
     rtttl.updateMelody();
-    client.loop();
+    mqttClient.loop();
+
+    if (!mqttClient.connected()) {
+        mqtt_connect();
+    }
+
     webServer.handleClient();
 }
