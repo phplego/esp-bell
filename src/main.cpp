@@ -86,6 +86,10 @@ void setup()
     myTone(400, 100);
     myTone(1200, 100);
 
+    if(!SPIFFS.begin()){
+        SPIFFS.format();
+        SPIFFS.begin();
+    }
 
     String deviceName = "esp-bell";
     WiFi.hostname(deviceName);
@@ -123,6 +127,7 @@ void setup()
         menu += "<div>";
         menu += "<a href='/'>index</a> ";
         menu += "<a href='/play'>play</a> ";
+        menu += "<a href='/fs'>fs</a> ";
         menu += "<a href='/logout'>logout</a> ";
         menu += "</div><hr>";
 
@@ -145,6 +150,27 @@ void setup()
 
         webServer.send(200, "text/html; charset=utf-8", str);     
     });
+
+    // Show filesystem list of files
+    webServer.on("/fs", [menu](){
+        String output = "";
+        output += menu;
+
+        output += String() + "<pre>";
+
+        File f = SPIFFS.open("/manual.txt", "w");
+        f.print("hello");
+        f.close();
+        Dir dir = SPIFFS.openDir("/");
+        while (dir.next()) {
+            output += String() + dir.fileSize() + "B " + dir.fileName() + "\n";
+        }
+
+        output += String() + "</pre>";
+        webServer.send(400, "text/html", output);
+    });
+
+
 
     // Logout (reset wifi settings)
     webServer.on("/logout", [menu](){
