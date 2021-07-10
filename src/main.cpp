@@ -92,7 +92,6 @@ void setup()
     }
 
     String deviceName = "esp-bell";
-    WiFi.hostname(deviceName);
     WiFi.mode(WIFI_STA); // no access point after connect
 
     wifi_set_sleep_type(NONE_SLEEP_T); // prevent wifi sleep (stronger connection)
@@ -115,6 +114,8 @@ void setup()
         ESP.restart();
     }
 
+    // Host name should be set AFTER the wifi connect
+    WiFi.hostname(deviceName);
 
     mqttClient.begin(MQTT_HOST, MQTT_PORT, wifiClient);
     mqttClient.onMessage(messageReceived);
