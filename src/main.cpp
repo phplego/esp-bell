@@ -203,7 +203,7 @@ void setup()
             rtttl.play(melody);
             output += "Playing melody: " + melody;
         }
-        output += "<form method='POST'><textarea name='melody'>"+melody+"</textarea><button>play</button></form>";
+        output += "<form method='POST'><textarea name='melody' rows=10>"+melody+"</textarea><br><button>play</button></form>";
         webServer.send(200, "text/html", output);
     });
 
