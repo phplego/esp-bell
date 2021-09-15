@@ -5,16 +5,26 @@
 #include <MQTT.h>
 #include <ArduinoJson.h>
 #include <ESP8266WebServer.h>
+
+#include <SPI.h>
+#include <RH_NRF24.h>
+
 #include "DubRtttl.h"
 
 
-#define BUZZER_PIN 4
+#define BUZZER_PIN D3
+
+
+#define LED D4 //(D4 - built in)
 
 #define MQTT_HOST  "192.168.1.157"  // MQTT host (m21.cloudmqtt.com)
 #define MQTT_PORT  11883            // MQTT port (18076)   
 #define MQTT_USER  "mfkrdxtb"       // Ingored if brocker allows guest connection
 #define MQTT_PASS  "jD-qPTjdtV34"   // Ingored if brocker allows guest connection
 
+
+// Singleton instance of the radio driver
+RH_NRF24 nrf24(D1, D2); // use this for NodeMCU Amica/AdaFruit Huzzah ESP8266 Feather
 
 DubRtttl    rtttl(BUZZER_PIN);
 WiFiManager wifiManager;
@@ -85,6 +95,21 @@ void setup()
     myTone(800, 100);
     myTone(400, 100);
     myTone(1200, 100);
+
+
+    // NRF setup
+    nrf24.init();
+
+    if (!nrf24.setChannel(4)) {
+        Serial.println("setChannel failed");
+    }
+
+    if (!nrf24.setRF(RH_NRF24::DataRate2Mbps, RH_NRF24::TransmitPower0dBm)) {
+        Serial.println("setRF failed");
+    }
+
+    pinMode(LED, OUTPUT);
+
 
     if(!SPIFFS.begin()){
         SPIFFS.format();
@@ -220,6 +245,49 @@ void setup()
     myTone(1500, 100);
 }
 
+void radioLoop()
+{
+    static uint32 lastCounter = 0;
+    
+    if (nrf24.available())
+    {
+        // Should be a message for us now
+        uint8_t buf[RH_NRF24_MAX_MESSAGE_LEN];
+        uint8_t len = sizeof(buf);
+
+
+        if(nrf24.waitAvailableTimeout(100))
+        {
+            digitalWrite(LED, LOW); // turn led on
+            delay(10);
+            while(nrf24.recv(buf, &len))
+            {
+                uint32 counter = ((uint32 *) buf)[0];
+                Serial.print("Received:");
+                Serial.println(counter);
+                if(lastCounter && counter > lastCounter + 1)
+                  Serial.println(String() + "Failed packets " + (counter - lastCounter - 1));
+                lastCounter = counter;  
+
+                // Send a reply
+                {
+                String replay = "Confirm ";
+                replay += counter;
+                //nrf24.send(sdata, sizeof(sdata));
+                bool ok = nrf24.send((uint8_t *) replay.c_str(), replay.length());
+                if(!ok) Serial.println("Send failed");
+                }
+
+                bool ok = nrf24.waitPacketSent();
+                if(!ok) Serial.println("Wait sent failed");
+            }
+            digitalWrite(LED, HIGH); // turn led off
+        } else {
+            // no new message
+        }
+    }
+}
+
 void loop() 
 {
     ArduinoOTA.handle();
@@ -231,4 +299,5 @@ void loop()
     }
 
     webServer.handleClient();
+    radioLoop();
 }
