@@ -109,6 +109,7 @@ void setup()
     }
 
     pinMode(LED, OUTPUT);
+    digitalWrite(LED, HIGH); // turn led off
 
 
     if(!SPIFFS.begin()){
@@ -247,8 +248,7 @@ void setup()
 
 void radioLoop()
 {
-    static uint32 lastCounter = 0;
-    
+
     if (nrf24.available())
     {
         // Should be a message for us now
@@ -256,31 +256,26 @@ void radioLoop()
         uint8_t len = sizeof(buf);
 
 
-        if(nrf24.waitAvailableTimeout(100))
+        if(nrf24.waitAvailableTimeout(10))
         {
             digitalWrite(LED, LOW); // turn led on
-            delay(10);
             while(nrf24.recv(buf, &len))
             {
-                uint32 counter = ((uint32 *) buf)[0];
-                Serial.print("Received:");
-                Serial.println(counter);
-                if(lastCounter && counter > lastCounter + 1)
-                  Serial.println(String() + "Failed packets " + (counter - lastCounter - 1));
-                lastCounter = counter;  
+                buf[len] = 0;
+                String payload ((char*)buf);
+
+                mqttClient.publish("wifi2mqtt/esp-bell", String()+"{\"nrf\":\""+payload+"\"}");
 
                 // Send a reply
                 {
-                String replay = "Confirm ";
-                replay += counter;
-                //nrf24.send(sdata, sizeof(sdata));
-                bool ok = nrf24.send((uint8_t *) replay.c_str(), replay.length());
-                if(!ok) Serial.println("Send failed");
+                    bool ok = nrf24.send(buf, len); // same payload as replay
+                    if(!ok) Serial.println("Send failed");
                 }
 
                 bool ok = nrf24.waitPacketSent();
                 if(!ok) Serial.println("Wait sent failed");
             }
+            delay(10);
             digitalWrite(LED, HIGH); // turn led off
         } else {
             // no new message
