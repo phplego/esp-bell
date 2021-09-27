@@ -10,31 +10,34 @@
 #include <RH_NRF24.h>
 
 #include "DubRtttl.h"
+#include "Logger.h"
 
 
-#define BUZZER_PIN D3
+#define BUZZER_PIN  D3
+#define LED         D4 //(D4 - built in)
+
+#define MQTT_HOST  "xx.xx.xx.xx"    // MQTT host (m21.cloudmqtt.com)
+#define MQTT_PORT  1883             // MQTT port (18076)   
+#define MQTT_USER  "default_user"   // Ingored if brocker allows guest connection
+#define MQTT_PASS  "KJdu3423bD"     // Ingored if brocker allows guest connection
 
 
-#define LED D4 //(D4 - built in)
-
-#define MQTT_HOST  "192.168.1.157"  // MQTT host (m21.cloudmqtt.com)
-#define MQTT_PORT  11883            // MQTT port (18076)   
-#define MQTT_USER  "mfkrdxtb"       // Ingored if brocker allows guest connection
-#define MQTT_PASS  "jD-qPTjdtV34"   // Ingored if brocker allows guest connection
+#if __has_include("local-constants.h")
+#include "local-constants.h"                    // Override some constants if local file exists
+#endif
 
 
 // Singleton instance of the radio driver
-RH_NRF24 nrf24(D1, D2); // use this for NodeMCU Amica/AdaFruit Huzzah ESP8266 Feather
+RH_NRF24            nrf24(D1, D2);
+WiFiManager         wifiManager;
+WiFiClient          wifiClient;
+ESP8266WebServer    webServer(80);
+MQTTClient          mqttClient(10000);
+DubRtttl            rtttl(BUZZER_PIN);
+Logger              logger;
 
-DubRtttl    rtttl(BUZZER_PIN);
-WiFiManager wifiManager;
-WiFiClient  wifiClient;
-
-ESP8266WebServer webServer(80);
-
-
-
-MQTTClient mqttClient(10000);
+String gDeviceName  = "esp-bell-" + ESP.getChipId();
+String gTopic       = "wifi2mqtt/esp-bell";
 
 
 void myTone(int freq, int duration)
@@ -47,7 +50,7 @@ void myTone(int freq, int duration)
 
 
 void messageReceived(String &topic, String &payload) {
-    Serial.println("incoming: " + topic + " - " + payload);
+    logger.log("incoming: " + topic + " - " + payload);
 
     DynamicJsonDocument doc(10000);
 
@@ -61,29 +64,32 @@ void messageReceived(String &topic, String &payload) {
         String melody = doc["melody"];
 
         // Print values.
-        Serial.print("Playing melody: ");
-        Serial.println(melody);
+        logger.log_no_ln("Playing melody: ");
+        logger.print(melody);
 
         rtttl.play(melody);
     }
 }
+void mqtt_connect()
+{
+    static unsigned long stLastConnectTryTime = 0;
 
-void mqtt_connect() {
-    Serial.print("checking wifi...");
-    while (WiFi.status() != WL_CONNECTED) {
-        Serial.print(".");
-        delay(1000);
+    // retring to connect not too often (every minute)
+    if(stLastConnectTryTime && millis() - stLastConnectTryTime < 60000)
+        return;
+
+    stLastConnectTryTime = millis();
+
+    logger.log_no_ln("Connecting to MQTT...");
+    
+    if(mqttClient.connect(gDeviceName.c_str(), MQTT_USER, MQTT_PASS))
+    {
+        logger.println(" connected!");
+        mqttClient.subscribe(gTopic + "/set");
+        mqttClient.subscribe(gTopic + "/play");
     }
-
-    Serial.print("\nconnecting...");
-    while (!mqttClient.connect("esp-bell", MQTT_USER, MQTT_PASS)) {
-        Serial.print(".");
-        delay(1000);
-    }
-
-    Serial.println("\nconnected!");
-
-    mqttClient.subscribe("wifi2mqtt/esp-bell/set");
+    else
+        logger.println(" failed. Retry in 60 sec..");
 }
 
 void setup() 
@@ -100,12 +106,12 @@ void setup()
     // NRF setup
     nrf24.init();
 
-    if (!nrf24.setChannel(4)) {
-        Serial.println("setChannel failed");
+    if (!nrf24.setChannel(0x66)) {
+        logger.log("setChannel failed");
     }
 
     if (!nrf24.setRF(RH_NRF24::DataRate2Mbps, RH_NRF24::TransmitPower0dBm)) {
-        Serial.println("setRF failed");
+        logger.log("setRF failed");
     }
 
     pinMode(LED, OUTPUT);
@@ -117,22 +123,21 @@ void setup()
         SPIFFS.begin();
     }
 
-    String deviceName = "esp-bell";
     WiFi.mode(WIFI_STA); // no access point after connect
 
     wifi_set_sleep_type(NONE_SLEEP_T); // prevent wifi sleep (stronger connection)
 
     // On Access Point started (not called if wifi is configured)
     wifiManager.setAPCallback([](WiFiManager* mgr){
-        Serial.println( String("Please connect to Wi-Fi"));
-        Serial.println( String("Network: ") + mgr->getConfigPortalSSID());
-        Serial.println( String("Password: 12341234"));
-        Serial.println( String("Then go to ip: 10.0.1.1"));
+        logger.log( String("Please connect to Wi-Fi"));
+        logger.log( String("Network: ") + mgr->getConfigPortalSSID());
+        logger.log( String("Password: 12341234"));
+        logger.log( String("Then go to ip: 10.0.1.1"));
     });
 
     wifiManager.setAPStaticIPConfig(IPAddress(10,0,1,1), IPAddress(10,0,1,1), IPAddress(255,255,255,0));
     wifiManager.setConfigPortalTimeout(60);
-    wifiManager.autoConnect(deviceName.c_str(), "12341234"); // IMPORTANT! Blocks execution. Waits until connected
+    wifiManager.autoConnect(gDeviceName.c_str(), "12341234"); // IMPORTANT! Blocks execution. Waits until connected
 
     // Restart if not connected
     if (WiFi.status() != WL_CONNECTED) 
@@ -141,7 +146,7 @@ void setup()
     }
 
     // Host name should be set AFTER the wifi connect
-    WiFi.hostname(deviceName);
+    WiFi.hostname(gDeviceName);
 
     mqttClient.begin(MQTT_HOST, MQTT_PORT, wifiClient);
     mqttClient.onMessage(messageReceived);
@@ -155,6 +160,7 @@ void setup()
         menu += "<a href='/'>index</a> ";
         menu += "<a href='/play'>play</a> ";
         menu += "<a href='/fs'>fs</a> ";
+        menu += "<a href='/logs'>logs</a> ";
         menu += "<a href='/logout'>logout</a> ";
         menu += "</div><hr>";
 
@@ -233,9 +239,35 @@ void setup()
         webServer.send(200, "text/html", output);
     });
 
+    // Show logs page
+    webServer.on("/logs", [menu](){
+        String output = "";
+        String output2 = "";
+        output += menu;
+        output += String() + "millis: <span id='millis'>"+millis()+"</span>";
+        output += String() + "<br>size="+strlen(logger.buffer);
+        output += String() + "<pre id='text'>";
+        //output += String() + logger.buffer;
+        output2 += String() + "</pre>\n";
+        output2 += String() + "<script>\n";
+        output2 += String() + "const millis = " + millis()+"\n";
+        output2 += String() + "const replaceFunc = x => {\n";
+        output2 += String() +    "const deltaMillis = millis - parseInt(x.replace('.', ''))\n";        
+        output2 += String() +    "return new Date(Date.now() - deltaMillis).toLocaleString('RU')\n";
+        output2 += String() + "}\n";
+        output2 += String() + "document.getElementById('text').innerHTML = document.getElementById('text').innerHTML.replaceAll(/^\\d{3,}\\.\\d{3}/mg, replaceFunc)\n";
+        output2 += String() + "</script>";
+        webServer.setContentLength(output.length() + strlen(logger.buffer) + output2.length());
+        webServer.send(200, "text/html", output);
+        webServer.sendContent(String() + logger.buffer);
+        webServer.sendContent(output2);
+    });
+    
+
+
 
     bool ok = mqttClient.publish("wifi2mqtt/esp-bell", "started");
-    Serial.println(ok ? "Published: OK" : "Published: ERR");
+    logger.log(ok ? "Published: OK" : "Published: ERR");
 
     // Initialize OTA (firmware updates via WiFi)
     ArduinoOTA.begin();
@@ -259,6 +291,7 @@ void radioLoop()
         if(nrf24.waitAvailableTimeout(10))
         {
             digitalWrite(LED, LOW); // turn led on
+            myTone(700, 10);
             while(nrf24.recv(buf, &len))
             {
                 buf[len] = 0;
@@ -269,11 +302,11 @@ void radioLoop()
                 // Send a reply
                 {
                     bool ok = nrf24.send(buf, len); // same payload as replay
-                    if(!ok) Serial.println("Send failed");
+                    if(!ok) logger.log("Send failed");
                 }
 
                 bool ok = nrf24.waitPacketSent();
-                if(!ok) Serial.println("Wait sent failed");
+                if(!ok) logger.log("Wait sent failed");
             }
             delay(10);
             digitalWrite(LED, HIGH); // turn led off
