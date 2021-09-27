@@ -9,6 +9,7 @@ public:
     Logger();
     void log_no_ln(String message);
     void log(String message);
+    void log(String message, String message2);
     void print(String message);
     void ln();
     void println(String message);

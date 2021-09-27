@@ -36,7 +36,7 @@ MQTTClient          mqttClient(10000);
 DubRtttl            rtttl(BUZZER_PIN);
 Logger              logger;
 
-String gDeviceName  = "esp-bell-" + ESP.getChipId();
+String gDeviceName  = String() + "esp-bell-" + ESP.getChipId();
 String gTopic       = "wifi2mqtt/esp-bell";
 
 
@@ -70,6 +70,7 @@ void messageReceived(String &topic, String &payload) {
         rtttl.play(melody);
     }
 }
+
 void mqtt_connect()
 {
     static unsigned long stLastConnectTryTime = 0;
@@ -146,9 +147,13 @@ void setup()
     }
 
     // Host name should be set AFTER the wifi connect
-    WiFi.hostname(gDeviceName);
+    WiFi.hostname(gDeviceName.c_str());
+    logger.log("Hostname",  gDeviceName);
 
     mqttClient.begin(MQTT_HOST, MQTT_PORT, wifiClient);
+    logger.log("mqtt host", String()+MQTT_HOST);
+    logger.log("mqtt port", String()+MQTT_PORT);
+
     mqttClient.onMessage(messageReceived);
 
     mqtt_connect();
@@ -263,9 +268,6 @@ void setup()
         webServer.sendContent(output2);
     });
     
-
-
-
     bool ok = mqttClient.publish("wifi2mqtt/esp-bell", "started");
     logger.log(ok ? "Published: OK" : "Published: ERR");
 
@@ -297,7 +299,9 @@ void radioLoop()
                 buf[len] = 0;
                 String payload ((char*)buf);
 
-                mqttClient.publish("wifi2mqtt/esp-bell", String()+"{\"nrf\":\""+payload+"\"}");
+                logger.log("< NRF msg:", payload);
+
+                mqttClient.publish(gTopic, String()+"{\"nrf\":\""+payload+"\"}");
 
                 // Send a reply
                 {
@@ -308,7 +312,6 @@ void radioLoop()
                 bool ok = nrf24.waitPacketSent();
                 if(!ok) logger.log("Wait sent failed");
             }
-            delay(10);
             digitalWrite(LED, HIGH); // turn led off
         } else {
             // no new message

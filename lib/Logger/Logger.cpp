@@ -15,11 +15,18 @@ void Logger::log_no_ln(String message)
     Serial.print(output);
 }
 
+
 void Logger::log(String message)
 {
     this->log_no_ln(message);
     this->ln();
 }
+
+void Logger::log(String message, String message2)
+{
+    this->log(message + " " + message2);
+}
+
 
 void Logger::ln()
 {
